@@ -26,13 +26,17 @@ Nada con `NEXT_PUBLIC_` puede ser secreto.
 |---|---|
 | `POST /api/runs` | Valida `{ request, accessCode? }`, aplica la protección de cuota, crea el run, copia la web semilla y devuelve `{ id }` |
 | `GET /api/runs` | Últimos 20 runs (columnas explícitas) |
-| `GET /api/runs/[id]` | Run + tasks + informes + eventos |
-| `POST /api/runs/[id]/step` | Lock → `advanceRun` → libera el lock. Devuelve `{ status, done }`. `maxDuration = 60` |
-| `GET /api/config` | `{ accessCodeRequired: boolean, provider }` para la UI |
+| `GET /api/runs/[id]` | Run + tasks + informes + eventos + lista de archivos (sin contenido) |
+| `GET /api/runs/[id]/files` | Archivos del workspace con contenido (visor de código) |
+| `POST /api/runs/[id]/step` | Lock → `advanceRun` → libera el lock. Devuelve `{ status, done, quotaExhausted, paused? }` (`StepResponse` en `src/lib/api-types.ts`). 409 si hay otro paso en curso. `maxDuration = 60` |
+| `GET /api/config` | `{ accessCodeRequired, provider, model }` para la UI |
+| `GET /preview/[runId]/[[...path]]` | Sirve el workspace con CSP. Sin ruta → 308 a `index.html`. `POST` responde «formulario recibido (vista previa)» |
+
+Con `cacheComponents`, los `GET` llaman a `await connection()` para ser dinámicos de forma explícita. La lógica de servidor vive en `src/lib/server/` (`server-only`); las reglas de cuota son puras (`quota-rules.ts`, con tests) y cuentan en la tabla privada `run_quota`.
 
 ## Protección de la cuota gratuita
 La URL es pública y la cuota gratuita del LLM es limitada: un visitante podría agotarla y dejar la demo sin servicio.
-- Límite global por hora y límite por IP (hasheada), contando en `runs`.
+- Límite global por hora y límite por IP (hasheada), contando en la tabla privada `run_quota`.
 - `DEMO_ACCESS_CODE` opcional.
 - Petición de 1000 caracteres como máximo.
 - Si la cuota del LLM se agota: mensaje claro en la UI y run reanudable.

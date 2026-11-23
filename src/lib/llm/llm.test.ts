@@ -133,6 +133,28 @@ describe("normalizePlan", () => {
   });
 });
 
+describe("normalizePlan con checks sobre archivos que no son HTML", () => {
+  it("convierte selector_exists sobre CSS en text_contains y descarta link_exists desde CSS", () => {
+    const plan = normalizePlan({
+      summary: "s",
+      tasks: [
+        {
+          title: "Estilos",
+          description: "d",
+          acceptance_criteria: [
+            { description: "estilos del form", check: { type: "selector_exists", path: "css/styles.css", selector: ".contact-form" } },
+            { description: "enlace raro", check: { type: "link_exists", from: "css/styles.css", href: "a.html" } },
+          ],
+        },
+      ],
+    });
+    expect(plan.tasks[0]?.acceptance_criteria).toEqual([
+      { id: "c1", description: "estilos del form", check: { type: "text_contains", path: "css/styles.css", text: ".contact-form" } },
+      { id: "c2", description: "enlace raro" },
+    ]);
+  });
+});
+
 describe("combineVerdict", () => {
   const task = { acceptance_criteria: [{ id: "c1", description: "a" }, { id: "c2", description: "b" }] };
 

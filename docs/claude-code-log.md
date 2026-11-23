@@ -72,3 +72,19 @@ Registro, fase a fase, de cómo se construyó el proyecto con Claude Code. Se es
   - Un test del pacer destapó que la primera llamada esperaba sin motivo (`last = 0`); corregido.
   - La CLI mostró mensajes poco útiles («Cambios pedidos: Checks deterministas fallidos:» y un «✓ ✓» duplicado). Ahora la timeline muestra el primer criterio que falla y los iconos los pone la UI según el tipo de evento.
   - **Verificación de Gemini pendiente**: `gemini-3.1-flash-lite` existe (aparece en el listado de modelos y no da 404), pero durante toda la fase devolvió `503 high demand`, igual que `gemini-3.5-flash-lite`. `gemini-2.5-flash-lite` da 404 («no disponible para usuarios nuevos»). La clave funciona (no hay 401/403). El motor trata ese 503 como pausa reanudable, cubierto por tests.
+
+## Fase 4 — API, lock, protección de cuota y vista previa
+- **Petición a Claude Code**: rutas de la API, lock, protección de cuota y vista previa. Antes, volver a verificar Gemini.
+- **Cómo se usó**: skills `entrega` y `base-de-datos`. Claude Code leyó la documentación de Next 16 sobre Route Handlers con `cacheComponents` y `maxDuration`. Lo verificó todo contra el build de producción (`next start` con `LLM_PROVIDER=mock`), recorriendo la API con curl: creación, pasos, 409 del lock, vista del run, lista, vista previa y casos de error.
+- **Gemini, por fin verificado**: `gemini-3.1-flash-lite` seguía en 503, pero `gemini-3.5-flash` respondió con function calling en 1,4 s. Con él se hizo un **run real de punta a punta** desde la CLI contra Supabase: plan de 3 tareas, Develop escribiendo 5 archivos, Testing aprobando y una pausa reanudable ante un 503 que se reanudó con `--run`.
+- **Decisiones**:
+  - La lógica de servidor va en `src/lib/server/` con `server-only`; las reglas de cuota son puras y tienen tests.
+  - Los `GET` llaman a `connection()` para ser dinámicos de forma explícita.
+  - `GET /api/runs/[id]` devuelve los archivos sin contenido (el polling cada 2 s no arrastra el código), y el contenido sale de `/api/runs/[id]/files`.
+  - Vista previa: 308 a `index.html` cuando no hay ruta (los enlaces relativos necesitan `/preview/<id>/`), CSP y `nosniff`. Un `POST` responde «formulario recibido (vista previa)» para que los formularios de la web generada no den error.
+  - El build confirma que la web semilla entra en la traza de `/api/runs` (`.nft.json`), así que funcionará en Vercel.
+- **Correcciones** (gracias al run real con Gemini):
+  - El Orquestador generó un `selector_exists` con selector `form` sobre `css/styles.css`, imposible de cumplir. Ahora el prompt lo prohíbe y `normalizePlan` lo convierte en `text_contains` (y descarta `link_exists` desde archivos que no son HTML). Hay un test nuevo.
+  - Latencia de 20-40 s por llamada, peligrosa con un paso de 60 s: `thinkingLevel: LOW` la bajó a unos 10 s, con fallback automático si el modelo no lo admite.
+  - El SDK avisaba por consola al leer `res.text` en respuestas con llamadas a funciones; ahora el texto se extrae a mano de las partes.
+  - En la prueba con curl, los acentos llegaban mal: era la terminal de Windows, no la app (comprobado enviando un cuerpo UTF-8 desde archivo). Se borró el run de prueba con texto roto.

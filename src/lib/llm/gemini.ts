@@ -1,5 +1,5 @@
 // Proveedor Gemini (plan gratuito) con el SDK @google/genai y function calling.
-import { ApiError, FunctionCallingConfigMode, GoogleGenAI, type Content, type Part } from "@google/genai";
+import { ApiError, FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
 import { createPacer, withRetry, type HttpLikeError } from "./retry";
 import { LLMError, type CallInput, type CallOutput, type LLMProvider, type Msg, type ToolCall } from "./types";
 
@@ -60,6 +60,7 @@ function toHttpError(e: unknown): HttpLikeError | null {
 
 export function createGeminiProvider(opts: { apiKey: string; model: string }): LLMProvider {
   const ai = new GoogleGenAI({ apiKey: opts.apiKey });
+  let thinkingSupported = true;
 
   return {
     name: "gemini",
@@ -84,6 +85,8 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): L
             ],
             toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY, allowedFunctionNames: names } },
             temperature: 0.4,
+            // Razonamiento bajo: respuestas más rápidas (el paso tiene 60 s) y menos tokens.
+            ...(thinkingSupported ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
             httpOptions: { timeout: Math.min(TIMEOUT_MS, remaining) },
           },
         });
@@ -92,7 +95,16 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): L
       const res = await withRetry(
         async () => {
           await pace(input.deadline);
-          return request();
+          try {
+            return await request();
+          } catch (e) {
+            // Si el modelo no admite thinkingLevel, se desactiva y se repite sin él.
+            if (thinkingSupported && e instanceof ApiError && e.status === 400 && /thinking/i.test(e.message)) {
+              thinkingSupported = false;
+              return request();
+            }
+            throw e;
+          }
         },
         toHttpError,
         { deadline: input.deadline },
@@ -109,9 +121,15 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): L
         args: (c.args ?? {}) as Record<string, unknown>,
       }));
       const usage = res.usageMetadata;
+      // Texto a mano (sin `res.text`, que avisa por consola si hay llamadas a funciones).
+      const text = (candidate.content.parts ?? [])
+        .filter((p) => typeof p.text === "string" && !p.thought)
+        .map((p) => p.text)
+        .join("")
+        .trim();
       return {
         toolCalls,
-        text: res.text,
+        text: text || undefined,
         raw: candidate.content,
         usage: usage
           ? {

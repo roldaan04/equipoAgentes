@@ -42,6 +42,8 @@ export const PlanSchema = z.object({
 
 type FlatCheckT = z.infer<typeof FlatCheck>;
 
+const isHtml = (path: string) => path.toLowerCase().endsWith(".html");
+
 /** Convierte el check plano en uno tipado; si le faltan datos o la ruta no es válida, se descarta. */
 export function toCriterionCheck(flat: FlatCheckT | undefined): CriterionCheck | undefined {
   if (!flat) return undefined;
@@ -57,7 +59,10 @@ export function toCriterionCheck(flat: FlatCheckT | undefined): CriterionCheck |
     }
     case "selector_exists": {
       const p = path(flat.path);
-      return p && flat.selector?.trim() ? { type: "selector_exists", path: p, selector: flat.selector.trim() } : undefined;
+      const selector = flat.selector?.trim();
+      if (!p || !selector) return undefined;
+      // Un selector solo tiene sentido en HTML. En CSS/JS se comprueba que el texto aparezca.
+      return isHtml(p) ? { type: "selector_exists", path: p, selector } : { type: "text_contains", path: p, text: selector };
     }
     case "text_contains": {
       const p = path(flat.path);
@@ -65,7 +70,7 @@ export function toCriterionCheck(flat: FlatCheckT | undefined): CriterionCheck |
     }
     case "link_exists": {
       const from = path(flat.from);
-      return from && flat.href?.trim() ? { type: "link_exists", from, href: flat.href.trim() } : undefined;
+      return from && isHtml(from) && flat.href?.trim() ? { type: "link_exists", from, href: flat.href.trim() } : undefined;
     }
   }
 }

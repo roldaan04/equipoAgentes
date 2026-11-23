@@ -12,9 +12,9 @@ Reglas:
 - Cada tarea: título corto (máx. 60 caracteres), descripción concreta (qué archivos crear o modificar y qué deben contener) y 2-4 criterios de aceptación.
 - Añade a cada criterio un "check" determinista siempre que puedas:
   · file_exists {path}
-  · selector_exists {path, selector}: selectores CSS sencillos (etiqueta, #id, .clase, [atributo], descendiente). Sin :nth-child ni pseudoclases.
-  · text_contains {path, text}: texto VISIBLE de la página, corto (2-5 palabras).
-  · link_exists {from, href}: la página "from" tiene un <a> a "href".
+  · selector_exists {path, selector}: SOLO en archivos .html. Selectores CSS sencillos (etiqueta, #id, .clase, [atributo], descendiente). Sin :nth-child ni pseudoclases.
+  · text_contains {path, text}: en .html, texto VISIBLE de la página (2-5 palabras); en .css o .js, un fragmento literal del código (p. ej. ".contact-form").
+  · link_exists {from, href}: la página .html "from" tiene un <a> a "href".
   Rutas relativas a la raíz de la web, p. ej. "contacto.html" o "css/styles.css".
 - Si se crea una página, debe enlazarse desde la navegación de TODAS las páginas existentes: un criterio link_exists por página.
 - Nada de backends, bases de datos, frameworks, CDNs ni dependencias externas.
