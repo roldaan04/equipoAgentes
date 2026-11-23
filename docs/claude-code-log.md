@@ -88,3 +88,19 @@ Registro, fase a fase, de cómo se construyó el proyecto con Claude Code. Se es
   - Latencia de 20-40 s por llamada, peligrosa con un paso de 60 s: `thinkingLevel: LOW` la bajó a unos 10 s, con fallback automático si el modelo no lo admite.
   - El SDK avisaba por consola al leer `res.text` en respuestas con llamadas a funciones; ahora el texto se extrae a mano de las partes.
   - En la prueba con curl, los acentos llegaban mal: era la terminal de Windows, no la app (comprobado enviando un cuerpo UTF-8 desde archivo). Se borró el run de prueba con texto roto.
+
+## Fase 5 — UI completa, Realtime y driver de pasos
+- **Petición a Claude Code**: la UI completa (inicio y panel del run), Realtime con polling de respaldo y el driver de pasos.
+- **Cómo se usó**: skill `panel-ui`. Con `cacheComponents`, la página del run lee `params` dentro de `<Suspense>` (Partial Prerender). **Verificación en un navegador real**: con la skill `run`, Claude Code instaló `playwright-core` en el scratchpad (fuera del proyecto), lo conectó al Chrome del sistema en modo headless y condujo el build de producción con `LLM_PROVIDER=mock`: lanzó un run desde la UI, esperó a que terminara y comprobó automáticamente Realtime, la vista previa, el drawer y el móvil, además de revisar las capturas.
+- **Decisiones**:
+  - Un color por agente, definido una sola vez en `src/lib/ui/meta.ts` con clases completas (Tailwind no detecta clases construidas dinámicamente).
+  - Iconos SVG en línea, sin librerías.
+  - El estado de cada agente se deriva de `runs.current_agent` y de los últimos eventos de ese agente.
+  - Las tarjetas del kanban se animan al montarse de nuevo con `key = id:status`.
+  - Drawer con el historial de informes: veredicto por criterio, checks deterministas y feedback.
+  - La vista previa se recarga cuando se completa una tarea; los archivos tocados por Develop van marcados.
+  - El driver empieza en pausa si el run se quedó sin LLM y se pausa solo cuando llega `quotaExhausted`.
+- **Correcciones** (todas detectadas en la prueba con navegador):
+  - **Eventos perdidos al arrancar**: la timeline en directo mostraba 2 de los 4 eventos del primer paso. Un script aparte demostró que Realtime entrega el 100 % (10/10 eventos y todos los cambios de `tasks` y `runs`), así que era una carrera: el driver daba el primer paso mientras el canal se unía. Ahora el driver espera a la conexión en vivo y resincroniza 1 s después de `SUBSCRIBED`. Verificado de nuevo en el navegador: todos los eventos aparecen.
+  - **Desbordamiento horizontal en móvil**: el grid sin `grid-cols-1` dejaba que el visor de código ensanchara la página. Ahora hay `grid-cols-1` y `min-w-0`, y se comprobó que `scrollWidth` vale 390 en un viewport de 390.
+  - **Kanban inútil en móvil**: 6 columnas vacías de más de 1.000 px de alto. Ahora es una lista vertical con solo las columnas que tienen tareas.

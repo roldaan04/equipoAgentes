@@ -1,31 +1,13 @@
 import "server-only";
+import type { RunListItem, RunView } from "@/lib/api-types";
 import type { ServerClient } from "@/lib/supabase/server";
 import {
   EVENT_COLUMNS,
   RUN_COLUMNS,
   TASK_COLUMNS,
   TEST_REPORT_COLUMNS,
-  type AgentEvent,
-  type Run,
   type RunStatus,
-  type Task,
-  type TestReport,
 } from "@/lib/supabase/types";
-
-export type FileMeta = { path: string; updated_by: string | null; updated_at: string; bytes: number };
-
-export type RunView = {
-  run: Run;
-  tasks: Task[];
-  reports: TestReport[];
-  events: AgentEvent[];
-  files: FileMeta[];
-};
-
-export type RunListItem = Pick<Run, "id" | "request" | "status" | "created_at" | "updated_at"> & {
-  tasks_total: number;
-  tasks_done: number;
-};
 
 function fail(what: string, error: { message: string }): never {
   throw new Error(`Supabase (${what}): ${error.message}`);
