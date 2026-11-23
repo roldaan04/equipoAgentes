@@ -39,3 +39,36 @@ Registro, fase a fase, de cómo se construyó el proyecto con Claude Code. Se es
 - **Correcciones**:
   - `db:check` mostró `42501 permission denied` incluso con la clave secreta. Este proyecto de Supabase no concede privilegios automáticos a los roles de la API sobre tablas creadas por SQL. Como la 0001 ya estaba ejecutada, los `GRANT` se añadieron a la 0002, y la regla «toda tabla nueva lleva sus GRANT» quedó documentada en la skill `base-de-datos`.
   - El primer `db:check` usaba `head: true`, que no devuelve cuerpo de error y producía falsos positivos. Se cambió a `select … limit 1` y a comprobar códigos de error concretos (`PGRST205` para tabla inexistente, `42703` para columna inexistente).
+
+## Fase 2 — Web semilla y checks deterministas
+- **Petición a Claude Code**: crear la web semilla y `checks.ts` con sus tests.
+- **Cómo se usó**: skill `motor-agentes`. Antes de escribir los checks, Claude Code lanzó una sonda contra `node-html-parser` para comprobar en la práctica qué detecta `valid()`, qué selectores soporta y qué incluye `textContent`. Leyó la documentación de Next 16 sobre `outputFileTracingIncludes`. Bucle lint → typecheck → test → build hasta verde.
+- **Decisiones**:
+  - Web semilla «Horno Alba» (panadería ficticia): 3 páginas con la misma navegación, CSS con variables y un JS mínimo. Es pequeña a propósito para gastar poco contexto del LLM, y deliberadamente no tiene página de contacto, testimonios ni menú hamburguesa, que son las peticiones de ejemplo de la UI.
+  - La semilla se lee del disco y se incluye en la traza de `/api/runs` con `outputFileTracingIncludes`. Se descartó incrustarla en un módulo TS generado por ser más frágil de mantener.
+  - `text_contains` mira el texto visible (sin `<script>` ni `<style>`) para que no pase por un atributo o un comentario.
+  - `link_exists` resuelve rutas relativas, anclas y query strings.
+  - Los checks globales se aplican a toda la web, no solo a lo tocado, para detectar regresiones (p. ej. Develop borra un archivo que otra página enlaza).
+  - Un selector no válido o una ruta peligrosa hacen fallar el check con una explicación que llega a Develop; nunca lanzan una excepción.
+  - Un test garantiza que la semilla pasa todos los checks globales.
+- **Correcciones**: la sonda mostró que `textContent` incluye el código de `<script>` y `<style>` y pega bloques sin espacio. Se cambió a quitar esos nodos y usar `structuredText`. Los tests pasaron a la primera.
+
+## Fase 3 — Capa LLM, los 3 agentes y el engine
+- **Petición a Claude Code**: wrapper LLM (Gemini/mock), Orquestador, Develop y Testing, `engine.ts`, `npm run demo:cli` y una llamada mínima a Gemini para validar `LLM_MODEL`.
+- **Cómo se usó**: skill `motor-agentes`. Claude Code leyó los tipos de `@google/genai` 3.6 antes de escribir el adaptador y descubrió que Gemini 3 exige reenviar el `thoughtSignature` en conversaciones con function calling. Escribió primero el script de verificación del modelo (`npm run llm:check`). Bucle test → CLI → lint → typecheck → build hasta verde. Probó el engine de punta a punta con la CLI, primero en memoria y después contra Supabase.
+- **Decisiones**:
+  - Un solo `LLMProvider` (`callWithTools`) y `callStructured` para las salidas con zod (herramienta forzada y un reintento devolviendo el error al modelo).
+  - Cuota gratuita:
+    - mínimo 4,5 s entre llamadas;
+    - backoff ante 429/5xx que nunca espera más allá del presupuesto del paso (48 s);
+    - si no cabe, `LLMUnavailableError`: el run se pausa (no pasa a error) y `advanceRun` devuelve `paused`.
+  - Develop recibe el contenido de la web en el prompt (~12 KB), así escribe en el primer turno y termina en el segundo: 2 peticiones en lugar de 4-6.
+  - El check del plan se pide en formato plano, no como unión discriminada, para modelos pequeños. `normalizePlan` descarta checks incompletos o con rutas peligrosas.
+  - `attempts` se incrementa al empezar Develop, para que la UI muestre «intento 2/3» mientras trabaja. Un intento interrumpido por falta de cuota se repite sin contar doble.
+  - Fallbacks sin LLM: si Testing devuelve dos veces una salida no válida, se decide con los checks deterministas; si falla el resumen, se genera uno sin LLM.
+  - Mock de demo: entiende las peticiones de ejemplo y falla a propósito el primer intento de enlazar la navegación, para que se vea el ciclo Develop → Testing → cambios pedidos. Sirve de repuesto real si se agota la cuota.
+  - `RunStore` inyectable: tests y `--memory` sin BD; Supabase en la app.
+- **Correcciones**:
+  - Un test del pacer destapó que la primera llamada esperaba sin motivo (`last = 0`); corregido.
+  - La CLI mostró mensajes poco útiles («Cambios pedidos: Checks deterministas fallidos:» y un «✓ ✓» duplicado). Ahora la timeline muestra el primer criterio que falla y los iconos los pone la UI según el tipo de evento.
+  - **Verificación de Gemini pendiente**: `gemini-3.1-flash-lite` existe (aparece en el listado de modelos y no da 404), pero durante toda la fase devolvió `503 high demand`, igual que `gemini-3.5-flash-lite`. `gemini-2.5-flash-lite` da 404 («no disponible para usuarios nuevos»). La clave funciona (no hay 401/403). El motor trata ese 503 como pausa reanudable, cubierto por tests.

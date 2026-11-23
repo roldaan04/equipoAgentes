@@ -16,20 +16,26 @@ run 'queued'
   └► ORQUESTADOR planifica → crea tasks 'pending' → run 'running'
 
 run 'running' → primera task (por position) que no esté 'done' ni 'failed':
-  ├ 'pending' | 'changes_requested' → DEVELOP hace un intento → 'testing'
-  ├ 'testing' → TESTING evalúa
+  ├ 'pending' | 'changes_requested' → attempts++ → 'in_progress' → DEVELOP hace el intento → 'testing'
+  ├ 'in_progress' (paso anterior interrumpido) → DEVELOP repite el MISMO intento (sin attempts++)
+  ├ 'testing' → TESTING evalúa y guarda test_report (attempt = attempts)
   │     ├ todo OK → 'done'
-  │     └ fallos  → attempts++ y guarda test_report
-  │                 ├ attempts < 3  → 'changes_requested' (Develop recibe el feedback)
-  │                 └ attempts >= 3 → 'failed'
+  │     └ fallos  ├ attempts < 3  → 'changes_requested' (Develop recibe el feedback)
+  │               └ attempts >= 3 → 'failed'
   └ no quedan tasks → ORQUESTADOR redacta el resumen → 'completed' | 'completed_with_errors'
 
 Excepción no recuperable → run 'error' + evento 'error'.
-Cuota del LLM agotada (429 tras los reintentos) → evento 'error' con un texto claro;
-el run NO pasa a 'error': se queda en su estado y se puede reanudar más tarde.
+LLM no disponible (LLMUnavailableError: 429 o 5xx tras los reintentos) → evento 'error'
+con un texto claro; el run NO pasa a 'error': se queda en su estado y advanceRun
+devuelve `paused: { reason }` para que la UI se pause sola y se pueda reanudar.
 ```
 
-Límites: 1–6 tasks por run, 3 intentos por task y 6 turnos de herramientas por paso de Develop.
+- `attempts` cuenta los intentos **empezados** (se incrementa al empezar Develop), así la UI muestra «intento 2/3» mientras trabaja.
+- Presupuesto de tiempo por paso: `STEP_BUDGET_MS` (48 s, la función tiene `maxDuration = 60`). Develop no empieza un turno si quedan menos de 14 s: entrega lo que tiene a Testing. Los reintentos y el ritmo entre llamadas nunca esperan más allá de la hora límite.
+- Si Testing devuelve dos veces una salida no válida, se decide solo con los checks deterministas (evento `error` visible). Si el resumen final falla, se usa uno generado sin LLM.
+- `stepWithLock(runId, deps)` toma el lock, avanza un paso y lo libera (null → 409).
+
+Límites (`limits.ts`): 1–6 tasks por run, 3 intentos por task y 6 turnos de herramientas por paso de Develop.
 
 ## Orquestador — `orchestrator.ts`
 - Entrada: la petición y el listado de archivos (ruta + primeras 15 líneas).
@@ -53,14 +59,18 @@ Límites: 1–6 tasks por run, 3 intentos por task y 6 turnos de herramientas po
 - Al final, `summarizeRun()` resume qué se hizo y qué falló.
 
 ## Develop — `develop.ts`
-- Entrada: la task, sus criterios, el último `feedback` de Testing (si existe) y el listado de archivos.
+- Entrada: la task, sus criterios, el último `feedback` de Testing (si existe) y **el contenido de los archivos** (dentro de un presupuesto de 40.000 caracteres). Así puede escribir en el primer turno y terminar en el segundo sin gastar turnos en `read_file`, que es clave con 15 peticiones por minuto.
 - Herramientas (`tools.ts`): `list_files`, `read_file(path)`, `write_file(path, content)`, `delete_file(path)`, `finish(summary)`.
 - Cada llamada a una herramienta genera un evento `action` legible («Escribiendo contact.html»).
 - Debe enlazar las páginas nuevas desde la navegación y respetar el estilo de la web semilla.
 - Validación de rutas en `workspace.ts`: solo rutas relativas, sin `..`; extensiones `.html .css .js .json .svg .md .txt`; máximo 100 KB por archivo.
 
 ## Testing — `testing.ts` + `checks.ts`
-1. **Deterministas** (`checks.ts`, funciones puras con tests): los `check` de cada criterio + checks globales (HTML parseable, enlaces internos que existen, CSS/JS referenciados que existen).
+1. **Deterministas** (`checks.ts`, funciones puras con tests): los `check` de cada criterio + checks globales sobre toda la web (existe `index.html`, HTML bien formado, y enlaces, CSS, JS e imágenes internos que existen).
+   - `text_contains` busca en el texto **visible** del HTML (sin `<script>` ni `<style>`), sin distinguir mayúsculas y con los espacios normalizados.
+   - `link_exists` resuelve rutas relativas, anclas y query strings (`./contacto.html#form` cuenta como `contacto.html`).
+   - Un selector no válido o una ruta peligrosa hacen fallar el check con una explicación; nunca lanzan una excepción.
+   - La web semilla vive en `src/seed/site/` y la carga `src/seed/index.ts`. Un test garantiza que pasa todos los checks globales.
 2. **LLM** (función forzada `submit_report`) con los archivos tocados, los criterios y el resultado de los checks:
 ```ts
 { passed: boolean,
@@ -85,6 +95,12 @@ interface LLMProvider {
 - `mock.ts`: respuestas guionizadas y deterministas, para tests y para `LLM_PROVIDER=mock` (la demo funciona aunque no haya cuota).
 - `index.ts`: elige el proveedor con `LLM_PROVIDER` (`gemini` | `mock`). No hay más proveedores: si se agota la cuota de Gemini, se usa `mock`.
 - Comunes: reintentos con backoff exponencial ante 429/5xx (máx. 3, respetando `retry-after`), timeout de 45 s, validación zod de los argumentos (si fallan, se reintenta una vez devolviendo el error al modelo) y registro del uso en el `payload` del evento.
+  - `retry.ts`: `withRetry` (si la espera no cabe en el paso o supera 20 s, corta con `LLMUnavailableError`) y `createPacer` (mínimo 4,5 s entre llamadas a Gemini).
+  - `structured.ts`: `callStructured` (herramienta forzada + zod + un reintento) y `toolFromZod` (JSON Schema con `z.toJSONSchema`).
+  - El check del plan se pide al LLM en formato **plano** (`type`, `path?`, `selector?`…), más fácil para modelos pequeños que una unión discriminada. `normalizePlan` lo convierte y descarta los incompletos o con rutas peligrosas.
+  - **Gemini 3** devuelve `thoughtSignature` en las llamadas a funciones: el mensaje `assistant` guarda el contenido original en `raw` y se reenvía intacto en el siguiente turno.
+  - `CallInput.meta`: datos estructurados del agente que llama. Gemini los ignora; el mock los usa para responder con coherencia.
+  - Mock de demo (`createMockProvider`): entiende las peticiones de ejemplo (contacto, testimonios, hamburguesa; el resto añade un aviso) y falla a propósito el primer intento de enlazar Contacto en la navegación, para que se vea el ciclo de cambios. Para tests, `createScriptedProvider`.
 - Los planes gratuitos tienen pocas peticiones por minuto: no lanzar llamadas en paralelo.
 
 ## Prompts — `prompts.ts`
@@ -96,4 +112,11 @@ En español, cortos y con rol, formato y límites explícitos. Cada prompt termi
 - `engine.ts` con el proveedor mock: un run completo con una tarea que falla una vez y luego pasa, y una tarea que agota los 3 intentos.
 
 ## CLI
-`npm run demo:cli "Añade una página de contacto"` ejecuta `advanceRun` en bucle contra Supabase e imprime los eventos. Sirve para probar el motor sin UI.
+`npm run demo:cli -- "Añade una página de contacto" [--mock] [--memory] [--run <id>]` ejecuta `stepWithLock` en bucle contra Supabase e imprime los eventos. Sirve para probar el motor sin UI.
+- `--mock`: sin gastar cuota.
+- `--memory`: sin Supabase.
+- `--run <id>`: reanuda un run en pausa.
+
+`npm run llm:check` verifica `LLM_MODEL` con una sola llamada (function calling forzado) y lista los modelos Flash si el modelo no es válido.
+
+Almacén: `store.ts` define la interfaz `RunStore`, con `store-supabase.ts` (cliente inyectado) y `store-memory.ts` (tests y `--memory`).
