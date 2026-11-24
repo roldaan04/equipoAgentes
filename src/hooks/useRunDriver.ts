@@ -2,17 +2,19 @@
 // Driver de pasos: mientras el run no haya terminado, llama a
 // POST /api/runs/[id]/step en bucle con 1 s entre pasos (cuota gratuita).
 // 409 → reintenta a los 2 s. 429/5xx/red → backoff exponencial y aviso.
-// Cuota agotada → se pausa solo y muestra el motivo. Botón Pausar/Reanudar.
+// LLM saturado (503) → espera 20 s con cuenta atrás y reanuda solo (máx. 3 veces seguidas).
+// Cuota agotada (429) → se pausa y muestra el motivo. Botón Pausar/Reanudar.
 import { useCallback, useEffect, useState } from "react";
 import type { ApiError, StepResponse } from "@/lib/api-types";
+import { decideAfterStep } from "@/lib/ui/driver-policy";
 
 export type DriverMode = "running" | "paused" | "done";
 
 export type DriverState = {
   mode: DriverMode;
   stepping: boolean;
-  /** Aviso temporal (reintentos) o motivo de la pausa automática. */
-  notice: { kind: "warning" | "quota"; message: string } | null;
+  /** Aviso temporal (reintentos), cuenta atrás de reanudación automática («auto») o motivo de la pausa. */
+  notice: { kind: "warning" | "quota" | "auto"; message: string } | null;
 };
 
 const STEP_GAP_MS = 1000;
@@ -51,6 +53,7 @@ export function useRunDriver(
     void (async () => {
       let backoff = 2000;
       let errors = 0;
+      let autoResumes = 0; // reanudaciones automáticas seguidas por saturación del LLM
       const retryLater = async (message: string) => {
         errors++;
         if (errors >= MAX_CONSECUTIVE_ERRORS) {
@@ -94,13 +97,35 @@ export function useRunDriver(
         backoff = 2000;
         errors = 0;
         onStep?.(data);
-        if (data.done) {
+
+        const decision = decideAfterStep(data, autoResumes);
+        autoResumes = decision.autoResumes;
+        const { next } = decision;
+
+        if (next.action === "done") {
           setState({ mode: "done", stepping: false, notice: null });
           return;
         }
-        if (data.quotaExhausted) {
-          setState({ mode: "paused", stepping: false, notice: { kind: "quota", message: data.paused?.message ?? "El LLM no está disponible ahora mismo." } });
+        if (next.action === "pause") {
+          setState({ mode: "paused", stepping: false, notice: { kind: "quota", message: next.message } });
           return;
+        }
+        if (next.action === "auto-resume") {
+          // Saturación temporal del LLM: se espera con cuenta atrás y se sigue solo.
+          // Si el usuario pulsa Pausar, el efecto se limpia y `cancelled` corta la espera.
+          for (let left = next.delaySeconds; left > 0; left--) {
+            if (cancelled) return;
+            setState((s) => ({
+              ...s,
+              stepping: false,
+              notice: {
+                kind: "auto",
+                message: `Gemini no responde ahora mismo (saturación temporal). Reintento automático en ${left} s (intento ${next.attempt} de ${next.max}). Pulsa Pausar si prefieres detenerlo.`,
+              },
+            }));
+            await sleep(1000);
+          }
+          continue;
         }
         setState((s) => ({ ...s, stepping: false, notice: null }));
         await sleep(STEP_GAP_MS);

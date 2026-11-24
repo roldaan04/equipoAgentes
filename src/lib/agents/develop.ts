@@ -4,7 +4,12 @@ import type { LLMProvider, Msg, ToolResult, Usage } from "../llm/types";
 import type { Task } from "../supabase/types";
 import { MAX_DEVELOP_TURNS, MIN_TURN_TIME_MS } from "./limits";
 import { DEVELOP_SYSTEM, developPrompt } from "./prompts";
-import { DEVELOP_TOOLS, executeTool, filesBlock, type Workspace } from "./tools";
+import { DEVELOP_TOOLS, executeTool, filesBlock, prioritizeFiles, type Workspace } from "./tools";
+
+/** Todo el texto de la tarea (título, descripción, criterios y sus checks), para saber qué archivos nombra. */
+export function taskText(task: Pick<Task, "title" | "description" | "acceptance_criteria">): string {
+  return [task.title, task.description, ...task.acceptance_criteria.map((c) => `${c.description} ${c.check ? JSON.stringify(c.check) : ""}`)].join("\n");
+}
 
 export type DevelopResult = {
   summary: string;
@@ -30,7 +35,13 @@ export async function runDevelop(opts: {
   const messages: Msg[] = [
     {
       role: "user",
-      text: developPrompt({ task: opts.task, attempt: opts.attempt, feedback: opts.feedback, filesBlock: filesBlock(opts.files) }),
+      text: developPrompt({
+        task: opts.task,
+        attempt: opts.attempt,
+        feedback: opts.feedback,
+        // Solo caben unos 8.000 caracteres de archivos: primero los que nombra la tarea.
+        filesBlock: filesBlock(prioritizeFiles(opts.files, taskText(opts.task))),
+      }),
     },
   ];
   const touched = new Set<string>();
@@ -67,14 +78,27 @@ export async function runDevelop(opts: {
     messages.push({ role: "assistant", toolCalls: out.toolCalls, text: out.text, raw: out.raw });
     const results: ToolResult[] = [];
     let finished: { summary: string } | undefined;
+    const wroteThisTurn = new Set<string>();
+    let failedThisTurn = false;
     for (const call of out.toolCalls) {
       const exec = await executeTool(call, opts.workspace);
-      if (exec.touched) touched.add(exec.touched);
+      if (exec.touched) {
+        touched.add(exec.touched);
+        wroteThisTurn.add(exec.touched);
+      }
       if (exec.message) await opts.onAction(exec.message, { tool: call.name, path: exec.touched ?? null });
       if (exec.finished) finished = exec.finished;
+      if (exec.result !== null && typeof exec.result === "object" && "error" in exec.result) failedThisTurn = true;
       results.push({ id: call.id, name: call.name, result: exec.result });
     }
     if (finished) return { summary: finished.summary, finished: true, turns, touched: [...touched], usage };
+    // Si el modelo ha escrito sin errores, no se gasta otra petición solo para que llame a finish:
+    // esa segunda petición arrastra todo lo escrito y es la más pesada (y la que más falla en el plan
+    // gratuito). Testing revisa el resultado; si falta algo, se lo pedirá a Develop en el siguiente intento.
+    if (wroteThisTurn.size > 0 && !failedThisTurn) {
+      const list = [...wroteThisTurn];
+      return { summary: `He modificado ${list.join(", ")} para cumplir «${opts.task.title}».`, finished: true, turns, touched: [...touched], usage };
+    }
     messages.push({ role: "tool", results });
   }
 

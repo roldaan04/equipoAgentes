@@ -90,6 +90,17 @@ export async function executeTool(call: ToolCall, ws: Workspace): Promise<ToolEx
   }
 }
 
+/**
+ * Ordena los archivos por relevancia para una tarea: primero los que el texto de la tarea
+ * nombra, luego css/styles.css y después el resto (los pequeños antes). Así, con un
+ * presupuesto de caracteres corto, lo que se queda fuera es lo menos útil.
+ */
+export function prioritizeFiles<T extends { path: string; content: string }>(files: ReadonlyArray<T>, taskText: string): T[] {
+  const text = taskText.toLowerCase();
+  const rank = (f: T) => (text.includes(f.path.toLowerCase()) ? 0 : f.path === "css/styles.css" ? 1 : 2);
+  return [...files].sort((a, b) => rank(a) - rank(b) || a.content.length - b.content.length || a.path.localeCompare(b.path));
+}
+
 /** Bloque de archivos para un prompt, dentro de un presupuesto de caracteres. */
 export function filesBlock(files: ReadonlyArray<{ path: string; content: string }>, budget = PROMPT_FILES_BUDGET): string {
   let used = 0;

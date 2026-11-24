@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { normalizePlan } from "../agents/orchestrator";
 import { combineVerdict } from "../agents/testing";
+import { httpTimeoutMs, wantsThinkingLevel } from "./gemini";
 import { createScriptedProvider } from "./mock";
 import { createPacer, withRetry, type HttpLikeError } from "./retry";
 import { InvalidOutputError, callStructured, toolFromZod } from "./structured";
@@ -11,6 +12,25 @@ const httpError = (status: number, retryAfterSeconds?: number) => Object.assign(
 const toHttp = (e: unknown): HttpLikeError | null =>
   e instanceof Error && "status" in e ? { status: Number(e.status), retryAfterSeconds: (e as { retryAfterSeconds?: number }).retryAfterSeconds, message: e.message } : null;
 const noSleep = async () => {};
+
+describe("httpTimeoutMs", () => {
+  it("usa lo que queda del paso (máximo 45 s) y devuelve null si quedan menos de 10 s", () => {
+    expect(httpTimeoutMs(undefined)).toBe(45_000);
+    expect(httpTimeoutMs(100_000, 40_000)).toBe(45_000);
+    expect(httpTimeoutMs(60_000, 40_000)).toBe(20_000);
+    expect(httpTimeoutMs(60_000, 50_000)).toBe(10_000);
+    // Caso real: tras reintentos quedaban 6 s y Gemini respondía 400 «deadline too short».
+    expect(httpTimeoutMs(60_000, 54_000)).toBeNull();
+  });
+});
+
+describe("wantsThinkingLevel", () => {
+  it("no pide thinkingLevel a los modelos Flash-Lite (con LOW van más lentos) y sí a los demás", () => {
+    expect(wantsThinkingLevel("gemini-3.1-flash-lite")).toBe(false);
+    expect(wantsThinkingLevel("gemini-3.5-flash-lite")).toBe(false);
+    expect(wantsThinkingLevel("gemini-3.5-flash")).toBe(true);
+  });
+});
 
 describe("withRetry", () => {
   it("reintenta ante 429/503 y acaba devolviendo el resultado", async () => {

@@ -30,7 +30,8 @@ Reglas:
 - Respeta el estilo existente: reutiliza las clases y variables CSS de css/styles.css y mantén la misma cabecera, navegación y pie en todas las páginas. Textos en español.
 - Si creas una página, enlázala en la navegación (.nav-list) de todas las páginas.
 - write_file escribe el archivo COMPLETO, nunca fragmentos.
-- Puedes llamar a varias herramientas en el mismo turno: haz todas las escrituras en tu primer turno siempre que puedas.
+- Los archivos relevantes ya vienen en el mensaje: no leas con read_file lo que no necesites y escribe directamente.
+- Haz TODAS las escrituras (varias write_file) en el MISMO turno: al terminar un turno con escrituras correctas, tu trabajo se entrega a Testing sin más turnos.
 - HTML válido y bien cerrado, rutas relativas, nada de recursos externos (CDN, imágenes remotas, fuentes externas).
 - Al terminar, llama a finish con un resumen de 1-2 frases de lo que cambiaste.
 - Tienes como máximo ${MAX_DEVELOP_TURNS} turnos.`;

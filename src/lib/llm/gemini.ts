@@ -1,7 +1,7 @@
 // Proveedor Gemini (plan gratuito) con el SDK @google/genai y function calling.
 import { ApiError, FunctionCallingConfigMode, GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
 import { createPacer, withRetry, type HttpLikeError } from "./retry";
-import { LLMError, type CallInput, type CallOutput, type LLMProvider, type Msg, type ToolCall } from "./types";
+import { LLMError, LLMUnavailableError, type CallInput, type CallOutput, type LLMProvider, type Msg, type ToolCall } from "./types";
 
 const TIMEOUT_MS = 45_000;
 /** ~13 peticiones/minuto como máximo: por debajo del límite gratuito de 15 RPM. */
@@ -58,9 +58,32 @@ function toHttpError(e: unknown): HttpLikeError | null {
   return null;
 }
 
+/** Gemini devuelve 400 si el plazo de la petición es menor de 10 s. */
+const MIN_HTTP_TIMEOUT_MS = 10_000;
+
+/**
+ * Plazo HTTP de una llamada: lo que quede del paso, con tope de TIMEOUT_MS.
+ * null = ya no queda tiempo suficiente para hacer la llamada en este paso.
+ */
+export function httpTimeoutMs(deadline: number | undefined, now: number = Date.now()): number | null {
+  if (deadline === undefined) return TIMEOUT_MS;
+  const remaining = deadline - now;
+  return remaining < MIN_HTTP_TIMEOUT_MS ? null : Math.min(TIMEOUT_MS, remaining);
+}
+
+/**
+ * ¿Se pide `thinkingLevel: LOW`? Ayuda en los modelos Flash (baja la latencia de 20-40 s a ~10 s),
+ * pero en los Flash-Lite lo empeora: medido con gemini-3.1-flash-lite y el prompt real del
+ * Orquestador, con LOW tarda 40-52 s (y acaba en 503) y sin él 5-10 s. Los Lite ya
+ * razonan poco por defecto, así que con ellos no se envía.
+ */
+export function wantsThinkingLevel(model: string): boolean {
+  return !/lite/i.test(model);
+}
+
 export function createGeminiProvider(opts: { apiKey: string; model: string }): LLMProvider {
   const ai = new GoogleGenAI({ apiKey: opts.apiKey });
-  let thinkingSupported = true;
+  let thinkingSupported = wantsThinkingLevel(opts.model);
 
   return {
     name: "gemini",
@@ -68,7 +91,11 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): L
     async callWithTools(input: CallInput): Promise<CallOutput> {
       const names = input.forceTool ? [input.forceTool] : input.tools.map((t) => t.name);
       const request = () => {
-        const remaining = input.deadline ? Math.max(5_000, input.deadline - Date.now()) : TIMEOUT_MS;
+        const timeout = httpTimeoutMs(input.deadline);
+        if (timeout === null) {
+          // Gemini rechaza plazos de menos de 10 s (400). No es un fallo: el run sigue en el siguiente paso.
+          throw new LLMUnavailableError("timeout", "No queda tiempo en este paso para otra llamada al LLM; continuará en el siguiente.");
+        }
         return ai.models.generateContent({
           model: opts.model,
           contents: toContents(input.messages),
@@ -87,7 +114,7 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): L
             temperature: 0.4,
             // Razonamiento bajo: respuestas más rápidas (el paso tiene 60 s) y menos tokens.
             ...(thinkingSupported ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
-            httpOptions: { timeout: Math.min(TIMEOUT_MS, remaining) },
+            httpOptions: { timeout },
           },
         });
       };

@@ -99,6 +99,11 @@ export function RunPanel({ runId }: { runId: string }) {
           {driver.notice.message}
         </ErrorBanner>
       )}
+      {driver.notice?.kind === "auto" && driver.mode === "running" && (
+        <ErrorBanner kind="warning" title="Reintentando automáticamente">
+          {driver.notice.message}
+        </ErrorBanner>
+      )}
       {driver.notice?.kind === "warning" && <ErrorBanner kind="warning" title="Problema de conexión">{driver.notice.message}</ErrorBanner>}
       {live.error && <ErrorBanner kind="warning" title="Sin actualizaciones">{live.error}</ErrorBanner>}
 
