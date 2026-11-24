@@ -8,21 +8,41 @@ import { StatusBadge } from "./StatusBadge";
 export function RecentRuns() {
   const [runs, setRuns] = useState<RunListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/runs", { cache: "no-store" })
       .then(async (r) => {
-        const body = (await r.json()) as { runs?: RunListItem[]; error?: string };
-        if (!r.ok) throw new Error(body.error ?? `Error ${r.status}`);
-        setRuns(body.runs ?? []);
+        const body = (await r.json().catch(() => ({}))) as { runs?: RunListItem[]; error?: string };
+        if (!r.ok) throw new Error(body.error ?? `Error ${r.status} al cargar los runs.`);
+        if (!cancelled) setRuns(body.runs ?? []);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "No se pudieron cargar los runs."));
-  }, []);
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error && e.message !== "Failed to fetch" ? e.message : "No se puede conectar con el servidor.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
+
+  const retry = () => {
+    setError(null);
+    setRuns(null);
+    setAttempt((n) => n + 1);
+  };
 
   return (
     <section aria-label="Runs recientes" className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
       <h2 className="border-b border-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-900">Runs recientes</h2>
-      {error && <p className="px-5 py-4 text-sm text-red-700">{error}</p>}
+      {error && (
+        <div className="px-5 py-4 text-sm">
+          <p className="text-red-700">{error}</p>
+          <button type="button" onClick={retry} className="mt-2 rounded-lg border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
+            Reintentar
+          </button>
+        </div>
+      )}
       {!error && runs === null && (
         <ul className="space-y-2 p-5" aria-busy="true">
           {[0, 1, 2].map((i) => (

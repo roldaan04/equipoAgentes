@@ -11,6 +11,8 @@ const EXAMPLES = [
   "Haz el menú responsive con botón hamburguesa",
 ];
 
+const NAVIGATION_FALLBACK_MS = 5000;
+
 export function LaunchForm() {
   const router = useRouter();
   const [request, setRequest] = useState("");
@@ -41,7 +43,15 @@ export function LaunchForm() {
       });
       const body = (await res.json().catch(() => ({}))) as Partial<CreateRunResponse & ApiError>;
       if (!res.ok || !body.id) throw new Error(body.error ?? `Error ${res.status} al crear el run.`);
-      router.push(`/runs/${body.id}`);
+      const url = `/runs/${body.id}`;
+      router.push(url);
+      // Red de seguridad: en una prueba la navegación en el cliente no terminó nunca (el servidor
+      // había respondido bien) y el botón se quedó en «Lanzando…». Si en unos segundos seguimos
+      // aquí, se hace una navegación completa. Si el push funciona, este componente se desmonta
+      // con la página y el temporizador no llega a hacer nada visible.
+      setTimeout(() => {
+        if (window.location.pathname !== url) window.location.assign(new URL(url, window.location.origin));
+      }, NAVIGATION_FALLBACK_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el run. Comprueba tu conexión.");
       setSubmitting(false);

@@ -16,7 +16,7 @@ Prueba técnica para **Speed Paradigm**: un equipo de **3 agentes de IA** que co
 
 ### Regla de oro: todo gratis
 Todos los servicios en plan gratuito y sin tarjeta. Solo es de pago Claude Code, que es la herramienta de desarrollo y no forma parte del producto.
-- **LLM de los agentes**: Google **Gemini API, plan gratuito** (modelo Flash). Si se agota la cuota, el repuesto es el proveedor `mock` (respuestas guionizadas, sin coste). Proveedor (`gemini` | `mock`) y modelo se eligen por variable de entorno.
+- **LLM de los agentes**: Google **Gemini API, plan gratuito**, modelo **Flash-Lite** (`gemini-3.5-flash-lite`: 500 peticiones/día y 15/min; los Flash grandes solo tienen 20/día y 5/min). Si se agota la cuota, el repuesto es el proveedor `mock` (respuestas guionizadas, sin coste). Proveedor (`gemini` | `mock`) y modelo se eligen por variable de entorno.
 - Nada de APIs o dependencias de pago. Si algo lo necesitara, para y pregunta.
 - Los planes gratuitos tienen límites de peticiones: hay que respetarlos (reintentos con backoff ante 429 y pocos turnos por paso) y la app tiene que mostrar un error claro si se agota la cuota.
 

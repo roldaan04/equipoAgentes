@@ -27,7 +27,10 @@ run 'running' → primera task (por position) que no esté 'done' ni 'failed':
 Excepción no recuperable → run 'error' + evento 'error'.
 LLM no disponible (LLMUnavailableError: 429 o 5xx tras los reintentos) → evento 'error'
 con un texto claro; el run NO pasa a 'error': se queda en su estado y advanceRun
-devuelve `paused: { reason }` para que la UI se pause sola y se pueda reanudar.
+devuelve `paused: { reason }`. La UI decide con `decideAfterStep` (skill panel-ui):
+  reason 'overloaded' (503) → reanuda sola tras 20 s (máx. 3 seguidas)
+  reason 'quota' (429)      → pausa; hay que pulsar Reanudar
+  reason 'timeout'          → no queda tiempo en el paso; sigue en el siguiente
 ```
 
 - `attempts` cuenta los intentos **empezados** (se incrementa al empezar Develop), así la UI muestra «intento 2/3» mientras trabaja.
@@ -59,8 +62,9 @@ Límites (`limits.ts`): 1–6 tasks por run, 3 intentos por task y 6 turnos de h
 - Al final, `summarizeRun()` resume qué se hizo y qué falló.
 
 ## Develop — `develop.ts`
-- Entrada: la task, sus criterios, el último `feedback` de Testing (si existe) y **el contenido de los archivos** (dentro de un presupuesto de 40.000 caracteres). Así puede escribir en el primer turno y terminar en el segundo sin gastar turnos en `read_file`, que es clave con 15 peticiones por minuto.
+- Entrada: la task, sus criterios, el último `feedback` de Testing (si existe) y **el contenido de los archivos relevantes**: `prioritizeFiles` pone primero los que nombra el texto de la tarea (título, descripción y checks), luego `css/styles.css` y después el resto, de menor a mayor; `filesBlock` los mete hasta `PROMPT_FILES_BUDGET` (8.000 caracteres) y lista los que no caben para que los lea con `read_file`. Así escribe en el primer turno sin gastar peticiones en leer.
 - Herramientas (`tools.ts`): `list_files`, `read_file(path)`, `write_file(path, content)`, `delete_file(path)`, `finish(summary)`.
+- **Develop termina tras el primer turno con escrituras correctas**, aunque no llame a `finish`: esa segunda petición solo serviría para cerrar, arrastra todo lo escrito y era la que más fallaba en el plan gratuito. El resumen lo genera el código («He modificado X para cumplir…»); si el modelo llama a `finish` en el mismo turno, se usa el suyo. Si alguna escritura falla (ruta no válida, demasiado grande), el error vuelve al modelo y sigue el bucle. Testing revisa el resultado y, si falta algo, lo pide en el siguiente intento.
 - Cada llamada a una herramienta genera un evento `action` legible («Escribiendo contact.html»).
 - Debe enlazar las páginas nuevas desde la navegación y respetar el estilo de la web semilla.
 - Validación de rutas en `workspace.ts`: solo rutas relativas, sin `..`; extensiones `.html .css .js .json .svg .md .txt`; máximo 100 KB por archivo.
@@ -91,7 +95,9 @@ interface LLMProvider {
   }): Promise<{ toolCalls: ToolCall[]; text?: string; usage?: Usage }>;
 }
 ```
-- `gemini.ts` (por defecto): SDK `@google/genai`, function calling. Modelo en `LLM_MODEL`; copiar el ID exacto desde Google AI Studio, porque los modelos cambian a menudo.
+- `gemini.ts` (por defecto): SDK `@google/genai`, function calling. Modelo en `LLM_MODEL`; copiar el ID exacto desde Google AI Studio, porque los modelos cambian a menudo. Modelo de la entrega: `gemini-3.5-flash-lite` (cuotas por modelo en la skill `entrega`).
+  - `thinkingLevel: LOW` **solo a modelos que no son «lite»** (`wantsThinkingLevel`): baja la latencia de los Flash grandes (20-40 s → ~10 s), pero a los Flash-Lite los empeora (36-52 s con él, 5-10 s sin él, medido con el prompt real del Orquestador). Si un modelo lo rechaza con 400, se desactiva y se repite la llamada.
+  - `httpTimeoutMs(deadline)`: el plazo HTTP es lo que queda del paso, con tope de 45 s. Gemini rechaza con 400 los plazos menores de 10 s, así que si queda menos no se llama: se lanza `LLMUnavailableError("timeout")` y el run sigue en el paso siguiente (no es un error del run).
 - `mock.ts`: respuestas guionizadas y deterministas, para tests y para `LLM_PROVIDER=mock` (la demo funciona aunque no haya cuota).
 - `index.ts`: elige el proveedor con `LLM_PROVIDER` (`gemini` | `mock`). No hay más proveedores: si se agota la cuota de Gemini, se usa `mock`.
 - Comunes: reintentos con backoff exponencial ante 429/5xx (máx. 3, respetando `retry-after`), timeout de 45 s, validación zod de los argumentos (si fallan, se reintenta una vez devolviendo el error al modelo) y registro del uso en el `payload` del evento.
@@ -117,6 +123,6 @@ En español, cortos y con rol, formato y límites explícitos. Cada prompt termi
 - `--memory`: sin Supabase.
 - `--run <id>`: reanuda un run en pausa.
 
-`npm run llm:check` verifica `LLM_MODEL` con una sola llamada (function calling forzado) y lista los modelos Flash si el modelo no es válido.
+`npm run llm:check` verifica `LLM_MODEL` con una sola llamada (function calling forzado), lista los modelos Flash si el modelo no es válido y avisa si no es un «lite» (20 peticiones al día).
 
 Almacén: `store.ts` define la interfaz `RunStore`, con `store-supabase.ts` (cliente inyectado) y `store-memory.ts` (tests y `--memory`).

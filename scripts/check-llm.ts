@@ -4,6 +4,9 @@
 import { ApiError, FunctionCallingConfigMode, GoogleGenAI } from "@google/genai";
 import { getServerEnv } from "@/lib/env";
 
+const LITE_HINT =
+  "En el plan gratuito solo los modelos «flash-lite» tienen 500 peticiones/día (15/min); los Flash grandes, 20/día (5/min). Recomendado: gemini-3.5-flash-lite.";
+
 async function listFlashModels(ai: GoogleGenAI): Promise<string[]> {
   const names: string[] = [];
   const pager = await ai.models.list({ config: { pageSize: 100 } });
@@ -52,6 +55,7 @@ async function main() {
     console.log(`  ✓ El modelo responde (${Date.now() - started} ms)`);
     console.log(call ? `  ✓ Function calling: ${call.name}(${JSON.stringify(call.args)})` : "  ✗ No devolvió ninguna llamada a función");
     console.log(`  · Tokens: entrada ${usage?.promptTokenCount ?? "?"}, salida ${usage?.candidatesTokenCount ?? "?"}, razonamiento ${usage?.thoughtsTokenCount ?? 0}`);
+    if (!/lite/i.test(env.LLM_MODEL)) console.log(`  ! ${LITE_HINT}`);
     process.exit(call ? 0 : 1);
   } catch (e) {
     if (e instanceof ApiError) {
@@ -61,6 +65,7 @@ async function main() {
       } else if (e.status === 404 || e.status === 400) {
         console.log("\nModelos Flash disponibles para tu clave (con generateContent):");
         for (const name of await listFlashModels(ai)) console.log(`  - ${name}`);
+        console.log(`\n${LITE_HINT}`);
       }
     } else {
       console.log(`  ✗ ${e instanceof Error ? e.message : String(e)}`);

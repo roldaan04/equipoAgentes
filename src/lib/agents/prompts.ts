@@ -33,7 +33,7 @@ Reglas:
 - Los archivos relevantes ya vienen en el mensaje: no leas con read_file lo que no necesites y escribe directamente.
 - Haz TODAS las escrituras (varias write_file) en el MISMO turno: al terminar un turno con escrituras correctas, tu trabajo se entrega a Testing sin más turnos.
 - HTML válido y bien cerrado, rutas relativas, nada de recursos externos (CDN, imágenes remotas, fuentes externas).
-- Al terminar, llama a finish con un resumen de 1-2 frases de lo que cambiaste.
+- Llama a finish con un resumen de 1-2 frases de lo que cambiaste, en el mismo turno que las escrituras.
 - Tienes como máximo ${MAX_DEVELOP_TURNS} turnos.`;
 
 export const TESTING_SYSTEM = `Eres Testing, el agente de QA del equipo. Decides si el trabajo de Develop cumple los criterios de aceptación de una tarea.

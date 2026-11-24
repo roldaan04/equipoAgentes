@@ -10,7 +10,5 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
-    // Fase 0 todavía no tiene tests; a partir de la fase 1 siempre habrá alguno.
-    passWithNoTests: true,
   },
 });

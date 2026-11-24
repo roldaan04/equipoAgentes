@@ -102,5 +102,5 @@ export async function runDevelop(opts: {
     messages.push({ role: "tool", results });
   }
 
-  return { summary: "Develop agotó sus turnos sin llamar a finish; Testing revisará lo que hay.", finished: false, turns, touched: [...touched], usage };
+  return { summary: "Develop agotó sus turnos sin entregar cambios válidos; Testing revisará lo que hay.", finished: false, turns, touched: [...touched], usage };
 }

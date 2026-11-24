@@ -8,8 +8,8 @@
     "start": "next start",
     "lint": "eslint --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node scripts/vitest.mjs run",
+    "test:watch": "node scripts/vitest.mjs",
     "db:check": "tsx --env-file=.env.local scripts/check-db.ts",
     "llm:check": "tsx --env-file=.env.local scripts/check-llm.ts",
     "demo:cli": "tsx --env-file=.env.local scripts/demo-cli.ts"

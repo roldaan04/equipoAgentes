@@ -12,7 +12,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=   # publishable o anon key
 SUPABASE_SECRET_KEY=                    # secret o service_role key. SOLO servidor
 LLM_PROVIDER=gemini                     # gemini | mock
-LLM_MODEL=                              # ID exacto de un modelo Flash del plan gratuito (copiar de AI Studio)
+LLM_MODEL=                              # ID exacto (copiar de AI Studio). Recomendado: gemini-3.5-flash-lite
 GEMINI_API_KEY=                         # aistudio.google.com, gratis, sin tarjeta
 IP_HASH_SALT=                           # cadena aleatoria
 MAX_RUNS_PER_HOUR=5
@@ -34,12 +34,26 @@ Nada con `NEXT_PUBLIC_` puede ser secreto.
 
 Con `cacheComponents`, los `GET` llaman a `await connection()` para ser dinámicos de forma explícita. La lógica de servidor vive en `src/lib/server/` (`server-only`); las reglas de cuota son puras (`quota-rules.ts`, con tests) y cuentan en la tabla privada `run_quota`.
 
+## Cuota gratuita de Gemini por modelo
+Los límites dependen del modelo; no hay un «~500 al día» general. Según el panel de límites de Google AI Studio del proyecto (noviembre de 2026; Google los cambia a menudo, conviene revisarlos):
+
+| Modelo | Peticiones/día | Peticiones/min |
+|---|---|---|
+| `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` (Flash-Lite) | 500 | 15 |
+| `gemini-3.5-flash`, `gemini-3.6-flash` (Flash grandes) | 20 | 5 |
+
+- Modelo de la entrega: **`gemini-3.5-flash-lite`** (el más rápido de los Lite en las mediciones).
+- Un run típico de 1-2 tareas gasta unas 4-6 peticiones: con un Lite caben ~80-100 runs al día; con un Flash grande, 3-4.
+- La cuota diaria se renueva a medianoche, hora del Pacífico (~9:00 en España). El 429 de cuota diaria trae `retryAfterSeconds` de horas.
+- Los 503 «high demand» son saturación de Google en el plan gratuito, no cuota: llegan en ráfagas y la UI los reintenta sola (ver skill `panel-ui`).
+
 ## Protección de la cuota gratuita
 La URL es pública y la cuota gratuita del LLM es limitada: un visitante podría agotarla y dejar la demo sin servicio.
 - Límite global por hora y límite por IP (hasheada), contando en la tabla privada `run_quota`.
 - `DEMO_ACCESS_CODE` opcional.
 - Petición de 1000 caracteres como máximo.
-- Si la cuota del LLM se agota: mensaje claro en la UI y run reanudable.
+- Si la cuota del LLM se agota (429): mensaje claro en la UI y run reanudable a mano. Si el modelo está saturado (503): reanudación automática con cuenta atrás.
+- Antes de desplegar, `MAX_RUNS_PER_HOUR` y `MAX_RUNS_PER_IP_PER_HOUR` deben volver a 5 y 3 si se subieron para probar.
 
 ## Log de Claude Code — `docs/claude-code-log.md`
 Es un entregable explícito («cuéntanos cómo lo usaste»). Se escribe **al cerrar cada fase**, no al final:

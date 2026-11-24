@@ -134,3 +134,28 @@ Registro, fase a fase, de cómo se construyó el proyecto con Claude Code. Se es
   - La reanudación automática está verificada con tests de la regla de decisión, pero **no se ha visto en el navegador**: en el run final no hubo ningún 503.
   - Propuestos y sin implementar: pasar a `mock` automáticamente si Gemini falla o se agota, alternar entre dos modelos Lite al reintentar, tope diario de peticiones al LLM, proteger `/step` (cualquiera puede avanzar un run ajeno), y subir los límites de runs para que no bloqueen a varios entrevistadores seguidos.
 - **Lección de proceso**: la primera comparación entre modelos parecía concluyente y estaba confundida con la hora; se detectó y se repitió alternando los modelos antes de decidir. Las pruebas guiaron cada arreglo: ninguna causa se dio por buena sin una medición.
+
+## Fase 6 — Pulido: estados de error, documentación al día y verificación en navegador
+- **Petición a Claude Code**: ponerse al día con los cambios hechos tras la Fase 5 (modelo `gemini-3.5-flash-lite`, `wantsThinkingLevel`, `httpTimeoutMs`, Develop sin `finish`, reanudación automática ante 503), actualizar la documentación que los contradecía y pulir estados vacíos, errores y responsive.
+- **Cómo se usó**: Claude Code leyó el log, `git log` y los diffs del último commit antes de tocar nada, y contrastó cada afirmación del programador con el código. Skills `panel-ui`, `motor-agentes` y `entrega`; documentación de Next 16 incluida (`error.js`: la prop es `retry`, no `reset`). Verificación con Chrome headless (playwright-core en el scratchpad) contra el build de producción con `LLM_PROVIDER=mock`, simulando respuestas de `/step` con `page.route`.
+- **Documentación corregida** (contradecía el código):
+  - `motor-agentes`: Develop recibe solo los archivos relevantes (`prioritizeFiles`, 8.000 caracteres, no 40.000) y termina tras un turno de escrituras correctas sin `finish`; `thinkingLevel` solo a modelos no «lite»; `httpTimeoutMs` y el mínimo de 10 s; qué hace la UI con cada `paused.reason`.
+  - `panel-ui`: el driver ya no solo se pausa con `quotaExhausted` (503 → reanudación automática con cuenta atrás, 429 → pausa manual, `timeout` → sigue); ruta real de la vista previa (`[[...path]]`); firma de `useRunDriver`; páginas de error.
+  - `entrega`: tabla de cuota por modelo (Flash-Lite 500/día y 15/min; Flash grandes 20/día y 5/min), cuándo se renueva y recordatorio de devolver los límites de runs a 5 y 3 antes de desplegar.
+  - `.env.example` y CLAUDE.md: recomiendan `gemini-3.5-flash-lite` y avisan de los 20/día de los Flash grandes. `npm run llm:check` también lo avisa.
+  - Comentario de `limits.ts`: decía que con ~11.000 caracteres siempre da 503, una hipótesis que el propio log refuta.
+- **Pulido**:
+  - `src/app/not-found.tsx` y `src/app/error.tsx` en español (antes salían las páginas por defecto de Next, en inglés). El error solo muestra el `digest`.
+  - `LaunchForm`: si `router.push` no ha navegado a los 5 s, navegación completa. Es la red de seguridad para el «Lanzando…» colgado de la Fase 5, cuya causa sigue sin determinar.
+  - `RecentRuns`: error legible con botón Reintentar.
+  - Prompt de Develop: `finish` «en el mismo turno que las escrituras», coherente con que el bucle termina tras escribir.
+- **Corrección inesperada: `npm test` fallaba siempre** (8 de 8 suites con «Cannot read properties of undefined (reading 'config')»), mientras `npx vitest run` pasaba. Claude Code aisló la causa con un script que lanza Vitest con el directorio de trabajo `c:\…` frente a `C:\…`: npm 11 ejecuta los scripts con la unidad en minúscula (como abre el proyecto VS Code) y Vitest 5 carga entonces sus módulos dos veces. Fijar `root` o hacer `chdir` en `vitest.config.mts` llega tarde, así que `npm test` pasa ahora por `scripts/vitest.mjs`, que normaliza la unidad del directorio y del binario antes de lanzar Vitest.
+- **Verificado en el navegador** (13/13):
+  - 404 en español; un id de run no válido muestra «Run no encontrado».
+  - Runs recientes: un error 500 simulado se ve, y Reintentar recupera la lista.
+  - Tras pulsar Lanzar, navega al panel en ~1,1 s.
+  - **Reanudación automática ante un 503 simulado** (pendiente desde la Fase 5): banner con cuenta atrás (20 → 18 s, «intento 1 de 3»), reanuda sin pulsar nada y el run termina.
+  - **Cuota agotada (429) simulada**: se pausa, no da ningún paso en 4 s, y con Reanudar el run termina.
+  - Móvil (390 px): sin desbordamiento en el inicio, el panel y la 404. La vista previa carga en móvil (enlaces Inicio, Carta y Nosotros visibles).
+  - Consola sin errores.
+- **Sigue pendiente**: la causa raíz del «Lanzando…» colgado (ahora hay red de seguridad), proteger `/step` frente a terceros y el resto de propuestas de la Fase 5 (pasar a mock automáticamente, tope diario de peticiones).
