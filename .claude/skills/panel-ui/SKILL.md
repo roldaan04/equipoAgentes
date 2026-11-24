@@ -25,7 +25,8 @@ Estilo: panel de control limpio y sobrio, Tailwind, sin librerías de componente
 
 ## Páginas de error y navegación
 - `src/app/not-found.tsx` (404 en español) y `src/app/error.tsx` (error boundary con **Reintentar**; en Next 16 la prop es `retry` y `error` llega como `unknown`). En producción solo se muestra el `digest`, nunca el mensaje del servidor.
-- `LaunchForm`: tras crear el run hace `router.push`; si a los 5 s sigue en la misma página, navega con `window.location.assign`. Es una red de seguridad: en una prueba la navegación en el cliente no terminó y el botón se quedó en «Lanzando…».
+- `LaunchForm`: el estado «Lanzando…» es `creating` (POST en curso) o `navigating` (de `useTransition`, con `router.push` dentro de `startNavigation`). **Nunca un `submitting` manual que solo se apague en el error**: con `cacheComponents`, Next no desmonta la página al navegar, la oculta con `<Activity>` y conserva su estado (ver `node_modules/next/dist/docs/01-app/02-guides/preserving-ui-state.md`), así que al volver a inicio el botón seguía en «Lanzando…» hasta pulsar F5 (se vio en producción). Regla general: en cualquier componente de una página que se vuelve a visitar, el estado transitorio debe apagarse solo cuando termina la acción.
+  - Red de seguridad: si a los 5 s la navegación sigue en curso, `window.location.assign`. El temporizador se cancela cuando `navigating` pasa a false.
 - `RecentRuns`: si falla la carga, muestra el motivo y un botón **Reintentar**.
 
 ## Hooks

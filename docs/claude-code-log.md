@@ -170,3 +170,14 @@ Registro, fase a fase, de cómo se construyó el proyecto con Claude Code. Se es
 - **Entregables**:
   - `README.md`: qué es, captura, diagramas mermaid (flujo y estados), stack, decisiones, cómo se usó Claude Code, ejecución en local y limitaciones.
   - `docs/architecture.md`: mapa del código, modelo de datos, secuencia de un paso, agentes, capa LLM, tiempo real, seguridad y límites.
+
+## Corrección tras el despliegue — «Lanzando…» al volver a inicio
+- **Petición a Claude Code**: el programador probó la demo en producción y, al volver a la página principal desde un run terminado, el botón se quedaba en «Lanzando…» hasta pulsar F5. El resto funcionaba bien.
+- **Cómo se usó**: Claude Code no se fio de la hipótesis anterior (la navegación no termina) y reprodujo el fallo antes de tocar nada, con Chrome headless contra el build de producción y el mock. La captura del programador ya daba la pista: el formulario conservaba el texto escrito, así que el componente no se había vuelto a montar.
+- **Causa**: con `cacheComponents`, Next 16 no desmonta la página al navegar: la oculta con `<Activity>` y conserva su estado de React y del DOM. `LaunchForm` ponía `submitting = true` y, si el POST salía bien, solo llamaba a `router.push` sin apagarlo. Al volver (con «atrás» o con «← Inicio») reaparecía la misma página con el botón bloqueado. Reproducido con los dos recorridos.
+- **Esto explica el «Lanzando…» de 13 minutos** que en la Fase 5 se dio por no resuelto y para el que en la Fase 6 se añadió una navegación de respaldo: no era un fallo de navegación, así que esa red de seguridad no habría arreglado nada. Se mantiene, pero ahora solo actúa si la navegación realmente se queda colgada.
+- **Arreglo**: `useTransition`. «Lanzando…» dura mientras el POST está en curso (`creating`) o la navegación está pendiente (`navigating`), y se apaga solo al terminar. La navegación de respaldo se cancela cuando `navigating` pasa a false. La skill `panel-ui` recoge la regla.
+- **Verificación**: en el navegador, con el `POST /api/runs` interceptado para devolver un run ya terminado y no gastar cuota, en los dos recorridos (botón atrás y enlace «← Inicio»): el botón vuelve a «Lanzar equipo» y se puede lanzar otro run desde esa misma página. Se esperaron 8 s para confirmar que la navegación de respaldo no vuelve a disparar. Lint, typecheck, 111 tests y build en verde.
+- **Dos cosas que se vieron por el camino**:
+  - Los runs de prueba contra el servidor local cuentan en el límite por hora de la demo pública, porque ambos usan la misma tabla `run_quota`. Las pruebas posteriores se hicieron sin crear runs.
+  - Ante el límite, el formulario muestra el aviso y el botón vuelve a «Lanzar equipo» (comprobado).

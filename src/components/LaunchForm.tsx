@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { REQUEST_MAX, REQUEST_MIN, type ApiError, type ConfigResponse, type CreateRunResponse } from "@/lib/api-types";
 import { cn } from "@/lib/ui/format";
 import { ErrorBanner } from "./ErrorBanner";
@@ -18,8 +18,16 @@ export function LaunchForm() {
   const [request, setRequest] = useState("");
   const [accessCode, setAccessCode] = useState("");
   const [config, setConfig] = useState<ConfigResponse | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  // `creating`: la petición POST está en curso. `navigating`: Next está cargando la página del run.
+  // «Lanzando…» dura solo mientras una de las dos es verdadera. Con cacheComponents, Next no desmonta
+  // esta página al navegar (la oculta con <Activity> y conserva su estado), así que un `submitting`
+  // manual se quedaba en true al volver atrás y el botón seguía en «Lanzando…» hasta pulsar F5.
+  // useTransition lo apaga solo cuando termina la navegación.
+  const [creating, setCreating] = useState(false);
+  const [navigating, startNavigation] = useTransition();
+  const submitting = creating || navigating;
   const [error, setError] = useState<string | null>(null);
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch("/api/config", { cache: "no-store" })
@@ -27,13 +35,21 @@ export function LaunchForm() {
       .catch(() => null);
   }, []);
 
+  // Si la navegación ya terminó, la red de seguridad de más abajo no hace falta.
+  useEffect(() => {
+    if (!navigating && fallbackTimer.current) {
+      clearTimeout(fallbackTimer.current);
+      fallbackTimer.current = null;
+    }
+  }, [navigating]);
+
   const length = request.trim().length;
   const valid = length >= REQUEST_MIN && length <= REQUEST_MAX;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!valid || submitting) return;
-    setSubmitting(true);
+    setCreating(true);
     setError(null);
     try {
       const res = await fetch("/api/runs", {
@@ -44,17 +60,17 @@ export function LaunchForm() {
       const body = (await res.json().catch(() => ({}))) as Partial<CreateRunResponse & ApiError>;
       if (!res.ok || !body.id) throw new Error(body.error ?? `Error ${res.status} al crear el run.`);
       const url = `/runs/${body.id}`;
-      router.push(url);
+      startNavigation(() => router.push(url));
+      setCreating(false);
       // Red de seguridad: en una prueba la navegación en el cliente no terminó nunca (el servidor
-      // había respondido bien) y el botón se quedó en «Lanzando…». Si en unos segundos seguimos
-      // aquí, se hace una navegación completa. Si el push funciona, este componente se desmonta
-      // con la página y el temporizador no llega a hacer nada visible.
-      setTimeout(() => {
+      // había respondido bien). Si pasados unos segundos la navegación sigue en curso, se hace una
+      // navegación completa. Se cancela sola en cuanto termina (efecto de `navigating`).
+      fallbackTimer.current = setTimeout(() => {
         if (window.location.pathname !== url) window.location.assign(new URL(url, window.location.origin));
       }, NAVIGATION_FALLBACK_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el run. Comprueba tu conexión.");
-      setSubmitting(false);
+      setCreating(false);
     }
   }
 
