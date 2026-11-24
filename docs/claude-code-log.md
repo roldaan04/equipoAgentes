@@ -159,3 +159,14 @@ Registro, fase a fase, de cómo se construyó el proyecto con Claude Code. Se es
   - Móvil (390 px): sin desbordamiento en el inicio, el panel y la 404. La vista previa carga en móvil (enlaces Inicio, Carta y Nosotros visibles).
   - Consola sin errores.
 - **Sigue pendiente**: la causa raíz del «Lanzando…» colgado (ahora hay red de seguridad), proteger `/step` frente a terceros y el resto de propuestas de la Fase 5 (pasar a mock automáticamente, tope diario de peticiones).
+
+## Fase 7 — Entrega: README, arquitectura, checklist de despliegue y verificación final
+- **Petición a Claude Code**: cerrar la fase 7 y confirmar que todo está terminado.
+- **Cómo se usó**: skill `entrega` (estructura del README y checklist). Antes de escribir la documentación, Claude Code comprobó que lo que iba a afirmar era cierto:
+  - **Clon limpio** del repositorio en el scratchpad (solo lo commiteado, sin `.env.local`): `npm ci`, lint, typecheck, 111 tests y build en verde. Es lo que verá Vercel.
+  - **Run real con Gemini** y el modelo de la entrega (`LLM_PROVIDER=gemini LLM_MODEL=gemini-3.5-flash-lite npm run demo:cli`, sobrescribiendo por variable de entorno sin leer `.env.local`). Llegó un 503 real de Google en el primer Develop, y al reanudar el run siguió donde estaba. Plan de 2 tareas: Testing **rechazó el intento 1 de la segunda tarea por un check determinista** (faltaba el enlace en `nosotros.html`), Develop lo corrigió y el run terminó `completed` en 7 pasos. Es el run de las capturas del README.
+  - **Capturas** del inicio, el panel y el drawer de informes con Chrome headless contra el build de producción. La primera captura del panel salió con las tarjetas a medio animar y el iframe en blanco (efecto de la captura de página completa); se repitió con un viewport alto y esperando a la animación.
+  - Cada afirmación de los documentos se contrastó con el código: las cascadas de las FK para el SQL de limpieza, los nombres de los tests del engine y el coste en peticiones medido en el run real.
+- **Entregables**:
+  - `README.md`: qué es, captura, diagramas mermaid (flujo y estados), stack, decisiones, cómo se usó Claude Code, ejecución en local y limitaciones.
+  - `docs/architecture.md`: mapa del código, modelo de datos, secuencia de un paso, agentes, capa LLM, tiempo real, seguridad y límites.

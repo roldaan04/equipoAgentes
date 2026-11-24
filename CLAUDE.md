@@ -8,11 +8,11 @@ Prueba técnica para **Speed Paradigm**: un equipo de **3 agentes de IA** que co
 3. **Testing**: comprueba el trabajo de Develop y devuelve lo que falla. El ciclo se repite hasta que todo pasa, con un máximo de 3 intentos por tarea.
 
 ### Requisitos del enunciado (checklist de entrega)
-- [ ] Next.js
-- [ ] Programado con Claude Code, documentando cómo se usó (`docs/claude-code-log.md`)
-- [ ] Base de datos gratuita → Supabase (plan Free)
-- [ ] Publicado en Vercel (plan Hobby) con URL pública
-- [ ] En pantalla se ve qué hace cada agente y en qué estado está cada tarea
+- [x] Next.js
+- [x] Programado con Claude Code, documentando cómo se usó (`docs/claude-code-log.md`)
+- [x] Base de datos gratuita → Supabase (plan Free)
+- [ ] Publicado en Vercel (plan Hobby) con URL pública → lo hace el programador siguiendo `docs/deploy.md`
+- [x] En pantalla se ve qué hace cada agente y en qué estado está cada tarea
 
 ### Regla de oro: todo gratis
 Todos los servicios en plan gratuito y sin tarjeta. Solo es de pago Claude Code, que es la herramienta de desarrollo y no forma parte del producto.
